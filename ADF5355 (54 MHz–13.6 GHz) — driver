@@ -1,0 +1,25 @@
+// ===== ADF5355 driver: write a register sequence exported by ADI software =====
+void ADF5355_program(const uint32_t* regs, size_t count) {
+  // The ADI tool exports in top-down order (e.g., R14 -> R0); just play it out
+  for (size_t i = 0; i < count; ++i) spiWrite32(regs[i]);
+}
+
+// --- Example placeholders ---
+// Generate the arrays below with ADI's ADF5355 software (UG-476).
+// Settings: REFIN=10 MHz, no doubler, no /2, R=1, your chosen PFD, INT/FRAC for exact RF.
+// Then paste the exported hex words into these arrays.
+
+// 1.000 GHz profile (FILL WITH ADI EXPORT)
+const uint32_t ADF5355_1GHz[] = {
+  // Example form: 0xXXXXXXXX, 0xXXXXXXXX, ...  (highest R down to lowest R)
+  // 0x????????, 0x????????, ...
+};
+
+// 3.000 GHz profile (FILL WITH ADI EXPORT)
+const uint32_t ADF5355_3GHz[] = {
+  // 0x????????, 0x????????, ...
+};
+
+// Usage
+void use_ADF5355_1GHz() { ADF5355_program(ADF5355_1GHz, sizeof(ADF5355_1GHz)/4); }
+void use_ADF5355_3GHz() { ADF5355_program(ADF5355_3GHz, sizeof(ADF5355_3GHz)/4); }
