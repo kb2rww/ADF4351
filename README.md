@@ -4,6 +4,15 @@ The right PLL math (for 10 MHz → 1 GHz)
 
 Using to make a CW beaken and other things.
 
+chrome-extension://efaidnbmnnnibpcajpcglclefindmkaj/https://www.analog.com/media/en/technical-documentation/data-sheets/adf4371.pdf
+
+chrome-extension://efaidnbmnnnibpcajpcglclefindmkaj/https://www.ti.com/lit/ds/symlink/lmx2594.pdf?HQS=dis-dk-null-digikeymode-dsf-pf-null-wwe&ts=1771883950641&ref_url=https%253A%252F%252Fwww.ti.com%252Fgeneral%252Fdocs%252Fsuppproductinfo.tsp%253FdistId%253D10%2526gotoUrl%253Dhttps%253A%252F%252Fwww.ti.com%252Flit%252Fgpn%252Flmx2594
+
+chrome-extension://efaidnbmnnnibpcajpcglclefindmkaj/https://www.analog.com/media/en/technical-documentation/data-sheets/ADF5355.pdf
+
+chrome-extension://efaidnbmnnnibpcajpcglclefindmkaj/https://www.analog.com/media/en/technical-documentation/data-sheets/ADF4351.pdf
+
+
 Reference (REFIN): 10 MHz
 R counter: 1 (no reference doubler/divider)
 PFD (phase detector): 10 MHz
