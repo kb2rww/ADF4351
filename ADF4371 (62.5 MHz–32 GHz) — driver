@@ -1,0 +1,19 @@
+// ===== ADF4371 driver =====
+void ADF4371_program(const uint32_t* regs, size_t count) {
+  // As with ADF5355, ADI exports top-down order; pulse LE after each 32-bit word
+  for (size_t i = 0; i < count; ++i) spiWrite32(regs[i]);
+}
+
+// 1.000 GHz via RF8x (FILL WITH ADI EXPORT)
+const uint32_t ADF4371_1GHz[] = {
+  // 0x????????, 0x????????, ...
+};
+
+// 3.000 GHz via RF8x (FILL WITH ADI EXPORT)
+const uint32_t ADF4371_3GHz[] = {
+  // 0x????????, 0x????????, ...
+};
+
+// Usage
+void use_ADF4371_1GHz() { ADF4371_program(ADF4371_1GHz, sizeof(ADF4371_1GHz)/4); }
+void use_ADF4371_3GHz() { ADF4371_program(ADF4371_3GHz, sizeof(ADF4371_3GHz)/4); }
