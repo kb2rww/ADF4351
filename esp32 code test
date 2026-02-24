@@ -1,0 +1,46 @@
+// Example with a typical ADF4351 Arduino library-style API
+// (Pin mapping: adjust to your wiring)
+#include <ADF4351.h>  // Use a library compatible with your environment
+
+const int PIN_LE   = 5;
+const int PIN_CLK  = 18;
+const int PIN_DATA = 23;
+const int PIN_CE   = 4;
+
+ADF4351 pll(PIN_LE, PIN_CLK, PIN_DATA, PIN_CE);
+
+void setup() {
+  pll.begin();
+
+  // 10 MHz reference, no doubler, no /2
+  pll.setReference(10000000UL, /*doubler=*/false, /*div2=*/false);
+
+  // Integer-N at 1 GHz via VCO 4 GHz and RF divider ÷4
+  pll.setFeedback(ADF4351_FEEDBACK_FUNDAMENTAL);
+  pll.setOutputDivider(4);
+  pll.setPrescaler(ADF4351_PRESCALER_8_9);
+
+  // Cleaner loop: lower CP current (1.25 mA); ABP 10 ns is common default
+  pll.setChargePumpCurrent(ADF4351_CP_1_25mA);
+  pll.setABP(ADF4351_ABP_10ns);
+  pll.enableDoubleBuffer(true);
+
+  // Band-select low mode with divider ~200 (50 kHz)
+  pll.setBandSelectMode(ADF4351_BS_LOW);
+  pll.setBandSelectClockDivider(200);
+
+  // Lock detect & mute-till-lock
+  pll.setLockDetectMode(ADF4351_LD_DIGITAL);
+  pll.enableMuteTillLock(true);
+
+  // RF out A enabled at +5 dBm (max)
+  pll.setRfOutA(true, ADF4351_POWER_P5dBm);
+  pll.setAuxOut(false, ADF4351_POWER_N4dBm, false); // aux off
+
+  // Finally set frequency (library should compute INT/FRAC/MOD = 400/0/1)
+  pll.setFrequency(1000000000UL);
+}
+
+void loop() {
+  // Optional: poll lock status if your library exposes it or via MUXOUT pin
+}
