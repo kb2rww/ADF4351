@@ -1,0 +1,37 @@
+// ===== Common SPI bit-bang for 32-bit words (MSB first) =====
+const int PIN_LE   = 5;    // Tie to LE/CSB (LMX2594 uses CSB; ADI uses LE)
+const int PIN_CLK  = 18;   // SCLK
+const int PIN_DATA = 23;   // SDI/MOSI
+const int PIN_CE   = 4;    // If the module breaks CE out (optional)
+const int PIN_LD   = 34;   // Optional: Lock Detect / MUXOUT
+
+static inline void spiDelay() { /* small hold if needed */ }
+
+void spiWrite32(uint32_t w) {
+  digitalWrite(PIN_LE, LOW);
+  for (int i = 31; i >= 0; --i) {
+    digitalWrite(PIN_CLK, LOW);
+    digitalWrite(PIN_DATA, (w >> i) & 1U);
+    spiDelay();
+    digitalWrite(PIN_CLK, HIGH);
+  }
+  digitalWrite(PIN_CLK, LOW);
+  digitalWrite(PIN_LE, HIGH);   // latch on rising edge
+  spiDelay();
+  digitalWrite(PIN_LE, LOW);
+}
+
+void synthInitPins() {
+  pinMode(PIN_LE, OUTPUT);
+  pinMode(PIN_CLK, OUTPUT);
+  pinMode(PIN_DATA, OUTPUT);
+  pinMode(PIN_CE, OUTPUT);
+  pinMode(PIN_LD, INPUT);     // optional
+  digitalWrite(PIN_LE, LOW);
+  digitalWrite(PIN_CLK, LOW);
+  digitalWrite(PIN_DATA, LOW);
+  digitalWrite(PIN_CE, LOW);
+  delay(5);
+  digitalWrite(PIN_CE, HIGH); // enable the chip (if CE exists)
+  delay(5);
+}
