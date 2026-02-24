@@ -1,0 +1,69 @@
+// ESP32 (Arduino) example to program ADF4351
+const int PIN_LE   = 5;
+const int PIN_CLK  = 18;
+const int PIN_DATA = 23;
+const int PIN_CE   = 4;
+const int PIN_LD   = 34; // MUXOUT configured to Digital Lock Detect (optional)
+
+void shiftWord(uint32_t w) {
+  digitalWrite(PIN_LE, LOW);
+  for (int i = 31; i >= 0; --i) {
+    digitalWrite(PIN_CLK, LOW);
+    digitalWrite(PIN_DATA, (w >> i) & 1);
+    // tiny setup time
+    digitalWrite(PIN_CLK, HIGH);
+  }
+  digitalWrite(PIN_CLK, LOW);
+  digitalWrite(PIN_LE, HIGH);   // latch on rising edge
+  // brief pulse
+  digitalWrite(PIN_LE, LOW);
+}
+
+void programADF4351(uint32_t R5, uint32_t R4, uint32_t R3,
+                    uint32_t R2, uint32_t R1, uint32_t R0) {
+  // R5 → R0 is the recommended order
+  shiftWord(R5);
+  shiftWord(R4);
+  shiftWord(R3);
+  shiftWord(R2);
+  shiftWord(R1);
+  shiftWord(R0);
+}
+
+void setup() {
+  pinMode(PIN_LE, OUTPUT);
+  pinMode(PIN_CLK, OUTPUT);
+  pinMode(PIN_DATA, OUTPUT);
+  pinMode(PIN_CE, OUTPUT);
+  pinMode(PIN_LD, INPUT);
+
+  digitalWrite(PIN_LE, LOW);
+  digitalWrite(PIN_CLK, LOW);
+  digitalWrite(PIN_DATA, LOW);
+  digitalWrite(PIN_CE, LOW);
+  delay(10);
+  digitalWrite(PIN_CE, HIGH); // enable PLL
+  delay(5);
+
+  // --- PLACEHOLDERS: substitute with computed words for 10 MHz → 1 GHz integer-N ---
+  uint32_t R5 = 0x00580005;        // Typical default for R5 (control)
+  uint32_t R4 = 0; // <-- to be filled: feedback=fundamental, div=÷4, power, BS clk divider, MTLD
+  uint32_t R3 = 0; // <-- to be filled: clock divider mode, abp, etc.
+  uint32_t R2 = 0; // <-- to be filled: R=1, CP current, LD=Digital, ref doubler/div2 off
+  uint32_t R1 = 0; // <-- to be filled: MOD=1, PHASE=1, prescaler=8/9, phase adjust off
+  uint32_t R0 = 0; // <-- to be filled: INT=400, FRAC=0
+
+  programADF4351(R5, R4, R3, R2, R1, R0);
+
+  // Optional: check lock
+  delay(10);
+  bool locked = digitalRead(PIN_LD);
+  if (locked) {
+    // locked!
+  } else {
+    // not locked yet; confirm wiring/values
+  }
+}
+
+void loop() {
+}
