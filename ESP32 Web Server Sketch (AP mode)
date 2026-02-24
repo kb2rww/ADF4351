@@ -1,0 +1,345 @@
+/*
+  ESP32 Wi-Fi Web UI for ADF4351 (REF = 10 MHz)
+  - Access Point: SSID "ADF4351-Setup", password "adf4351cfg"
+  - Change RF frequency (Hz) and output power (0=-4,1=-1,2=+2,3=+5 dBm)
+  - MTLD enabled, Digital LD, ABP 10ns
+  - Saves last settings to NVS (Preferences)
+
+  Endpoints:
+    GET  /            -> serves control page
+    GET  /api/status  -> JSON: {freq, power, locked, vco, divider, int, frac, mod}
+    POST /api/set     -> form fields: freq, power
+
+  Notes:
+    - Auto-selects RF output divider so VCO in 2.2..4.4 GHz.
+    - Integer-N if FRAC==0, else fractional-N (MOD auto-reduced).
+*/
+
+#include <Arduino.h>
+#include <WiFi.h>
+#include <WebServer.h>
+#include <Preferences.h>
+
+// -------- Pins --------
+const int PIN_LE   = 5;
+const int PIN_CLK  = 18;
+const int PIN_DATA = 23;
+const int PIN_CE   = 4;
+const int PIN_LD   = 34; // MUXOUT (digital lock detect), optional
+
+// -------- Wi-Fi AP settings --------
+const char* AP_SSID = "ADF4351-Setup";
+const char* AP_PASS = "adf4351cfg";
+
+WebServer server(80);
+Preferences prefs;
+
+// -------- ADF4351/PLL state --------
+static const uint32_t REF_HZ = 10000000UL; // 10 MHz
+uint64_t g_rfout_hz = 1000000000ULL;      // default 1 GHz
+uint8_t  g_power    = 3;                  // 0..3 => -4,-1,+2,+5 dBm (3 = max)
+bool     g_mtld     = true;               // Mute till lock (fixed ON in R4)
+
+// computed/debug
+uint32_t R[6]; // R0..R5 (we write R5..R0)
+uint8_t  dbg_rfdiv_code = 0;
+uint8_t  dbg_rfdiv_value = 1;
+uint64_t dbg_vco_hz = 4000000000ULL;
+uint32_t dbg_INT = 400, dbg_FRAC = 0, dbg_MOD = 1;
+
+// -------- HTML (served as a single page) --------
+const char PAGE_INDEX[] PROGMEM = R"HTML(
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ADF4351 Control</title>
+<style>
+body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;margin:20px;max-width:720px}
+.card{border:1px solid #ddd;border-radius:8px;padding:16px;margin-bottom:16px}
+h1{font-size:1.25rem}
+label{display:block;margin:.5rem 0 .25rem}
+input[type=text],select{width:100%;padding:.5rem;font-size:1rem}
+button{padding:.6rem 1rem;font-size:1rem;border:1px solid #0a6;border-radius:6px;background:#0c8;color:#fff;cursor:pointer}
+button:hover{background:#0a6}
+small{color:#666}
+.status{padding:.5rem;background:#f6f6f6;border-radius:6px;font-family:ui-monospace,Consolas,monospace}
+</style>
+</head>
+<body>
+  <h1>ESP32 + ADF4351</h1>
+
+  <div class="card">
+    <label for="freq">Frequency (Hz)</label>
+    <input id="freq" type="text" placeholder="e.g. 1000000000">
+    <small>Tip: For cleanest output near 1 GHz, use 2.5 MHz steps for integer‑N with 10 MHz PFD (e.g., 997500000, 1000000000, 1002500000).</small>
+
+    <label for="power">Output Power</label>
+    <select id="power">
+      <option value="0">0 = −4 dBm</option>
+      <option value="1">1 = −1 dBm</option>
+      <option value="2">2 = +2 dBm</option>
+      <option value="3">3 = +5 dBm (max)</option>
+    </select>
+
+    <div style="margin-top:12px">
+      <button onclick="apply()">Apply</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="status" id="status">Loading…</div>
+  </div>
+
+<script>
+async function refresh() {
+  try {
+    const r = await fetch('/api/status');
+    const s = await r.json();
+    document.getElementById('freq').value = s.freq;
+    document.getElementById('power').value = s.power;
+    document.getElementById('status').textContent =
+      `Lock: ${s.locked ? 'LOCKED' : 'UNLOCKED'} | ` +
+      `RFOUT: ${s.freq} Hz | Power: ${s.power} | ` +
+      `Divider: ÷${s.divider} | VCO: ${s.vco} Hz | ` +
+      `INT=${s.INT} FRAC=${s.FRAC} MOD=${s.MOD}`;
+  } catch(e) {
+    document.getElementById('status').textContent = 'Error loading status';
+  }
+}
+async function apply() {
+  const freq = document.getElementById('freq').value.trim();
+  const power = document.getElementById('power').value;
+  const form = new URLSearchParams();
+  form.append('freq', freq);
+  form.append('power', power);
+  const r = await fetch('/api/set', { method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body: form.toString() });
+  const txt = await r.text();
+  await refresh();
+  alert(txt);
+}
+refresh();
+setInterval(refresh, 1000);
+</script>
+
+</body>
+</html>
+)HTML";
+
+// -------- Low-level ADF4351 write (bit-bang) --------
+void adfWrite(uint32_t w){
+  digitalWrite(PIN_LE, LOW);
+  for(int i=31;i>=0;--i){
+    digitalWrite(PIN_CLK, LOW);
+    digitalWrite(PIN_DATA, (w>>i)&1);
+    digitalWrite(PIN_CLK, HIGH);
+  }
+  digitalWrite(PIN_CLK, LOW);
+  digitalWrite(PIN_LE, HIGH); // latch rising edge
+  digitalWrite(PIN_LE, LOW);
+}
+void programADF4351(){
+  adfWrite(R[5]);
+  adfWrite(R[4]);
+  adfWrite(R[3]);
+  adfWrite(R[2]);
+  adfWrite(R[1]);
+  adfWrite(R[0]);
+}
+
+// gcd helper
+uint32_t ugcd(uint32_t a,uint32_t b){ while(b){ uint32_t t=a%b; a=b; b=t; } return a; }
+
+// choose RF output divider to keep VCO 2.2..4.4 GHz
+uint8_t chooseDivider(uint64_t rf, uint64_t &vco){
+  uint8_t d=1; vco=rf;
+  while(vco<2200000000ULL && d<64){ d<<=1; vco<<=1; }
+  if(vco>4400000000ULL){ while(vco>4400000000ULL && d>1){ d>>=1; vco>>=1; } }
+  return d; // 1,2,4,8,16,32,64
+}
+uint8_t dividerCode(uint8_t d){
+  switch(d){ case 1:return 0; case 2:return 1; case 4:return 2; case 8:return 3;
+             case 16:return 4; case 32:return 5; case 64:return 6; default:return 0; }
+}
+
+// Build R0..R5 (write R5..R0). REF=10 MHz, R=1, no doubler, no /2.
+// Digital LD, PD Polarity +, ABP=10ns, Double Buffer ON, MTLD ON.
+void buildRegisters(){
+  // 1) Divider & VCO
+  uint64_t vco; uint8_t div = chooseDivider(g_rfout_hz, vco);
+  dbg_vco_hz = vco;
+  dbg_rfdiv_value = div;
+  dbg_rfdiv_code = dividerCode(div);
+
+  // 2) PFD
+  const uint32_t R_counter = 1;
+  const bool ref_doubler=false, ref_div2=false;
+  uint64_t f_pfd = REF_HZ; // 10 MHz
+  // no doubler, no /2
+  f_pfd /= R_counter;
+
+  // 3) N = INT + FRAC/MOD
+  long double N = (long double)vco / (long double)f_pfd;
+  uint32_t INT = (uint32_t)floor(N + 1e-12L);
+  long double frac = N - INT;
+
+  uint32_t MOD = 4095; // start with large modulus
+  uint32_t FRAC = (uint32_t) llround(frac * MOD);
+  if(FRAC >= MOD){ INT+=1; FRAC=0; }
+  if(FRAC != 0){ uint32_t g = ugcd(FRAC, MOD); FRAC/=g; MOD/=g; } else { MOD = 1; }
+
+  dbg_INT = INT; dbg_FRAC = FRAC; dbg_MOD = MOD;
+
+  bool presc89 = (INT >= 75);
+
+  // 4) Band-select clock divider (LOW mode: <=125 kHz). Aim ~50 kHz.
+  uint16_t bs_div = (uint16_t)((f_pfd + 25000) / 50000);
+  if(bs_div<1) bs_div=1; if(bs_div>255) bs_div=255;
+
+  // 5) Assemble registers
+  // R0: INT[31:15], FRAC[14:3], addr[2:0]=000
+  uint32_t R0 = ((INT & 0xFFFF) << 15) | ((FRAC & 0xFFF) << 3) | 0x0;
+
+  // R1: PHASE[26:15]=1, MOD[14:3], PRESCALER bit27, PHASE_ADJ bit28=0, addr=001
+  uint32_t PHASE = 1;
+  uint32_t R1 = ((PHASE & 0xFFF) << 15) | ((MOD & 0xFFF) << 3)
+              | ((presc89?1u:0u) << 27) | (0u << 28) | 0x1;
+
+  // R2: PD polarity +, Digital LD, Double buffer, R counter, MUXOUT=Digital LD,
+  //     Low-noise/spur mode=0 (default), CP current index ~1.25mA (3),
+  //     ABP=10ns, Band-select mode=LOW, addr=010
+  uint8_t icp_idx = 3; // ~1.25 mA (cleaner; modules vary slightly)
+  uint32_t R2 = 0;
+  R2 |= (1u << 28);                         // PD polarity = positive
+  R2 |= (1u << 26);                         // LDF = digital
+  R2 |= (1u << 24);                         // Double buffer ON
+  R2 |= ((R_counter & 0x3FFF) << 14);       // R counter
+  R2 |= ((ref_div2?1u:0u) << 13);           // ref /2
+  R2 |= ((ref_doubler?1u:0u) << 12);        // ref doubler
+  R2 |= (0b110u << 9);                      // MUXOUT = Digital LD
+  R2 |= (0u << 8);                          // Low-noise/spur mode = 0 (default)
+  R2 |= ((icp_idx & 0xF) << 4);             // CP current setting
+  R2 |= (1u << 3);                          // ABP = 10ns
+  R2 |= (0u << 2);                          // Band-select clk mode = LOW
+  R2 |= 0x2;
+
+  // R3: Clock divider mode direct, value=1, CSR off, addr=011
+  uint32_t R3 = 0;
+  R3 |= (0u << 22); // CDM direct
+  R3 |= (1u << 3);  // CD value = 1
+  R3 |= 0x3;
+
+  // R4: Feedback fundamental, RF divider, band-select divider, MTLD on,
+  //     Aux off, RF A on, power level, addr=100
+  uint32_t R4 = 0;
+  R4 |= (0u << 23);                         // Feedback = fundamental
+  R4 |= ((dbg_rfdiv_code & 0x7) << 20);     // RF divider select
+  R4 |= ((bs_div & 0xFF) << 12);            // Band-select clock divider
+  R4 |= ((g_mtld?1u:0u) << 10);             // MTLD = ON
+  R4 |= (0u << 9);                          // AUX disable
+  R4 |= (1u << 5);                          // RFOUTA enable
+  R4 |= ((g_power & 0x3) << 3);             // Power level
+  R4 |= 0x4;
+
+  // R5: recommended default (reserved)
+  uint32_t R5 = 0x00580005;
+
+  R[0]=R0; R[1]=R1; R[2]=R2; R[3]=R3; R[4]=R4; R[5]=R5;
+}
+
+void programAndSave(){
+  buildRegisters();
+  programADF4351();
+  // Save settings
+  prefs.putULL("freq", g_rfout_hz);
+  prefs.putUChar("power", g_power);
+}
+
+// -------- HTTP handlers --------
+void handleRoot(){
+  server.send_P(200, "text/html; charset=utf-8", PAGE_INDEX);
+}
+
+void handleStatus(){
+  // Recompute LD pin (optional)
+  int ld = digitalRead(PIN_LD);
+  String s = "{";
+  s += "\"freq\":" + String((unsigned long)g_rfout_hz) + ",";
+  s += "\"power\":" + String(g_power) + ",";
+  s += "\"locked\":" + String(ld ? 1 : 0) + ",";
+  s += "\"divider\":" + String(dbg_rfdiv_value) + ",";
+  s += "\"vco\":" + String((unsigned long)dbg_vco_hz) + ",";
+  s += "\"INT\":" + String(dbg_INT) + ",";
+  s += "\"FRAC\":" + String(dbg_FRAC) + ",";
+  s += "\"MOD\":" + String(dbg_MOD);
+  s += "}";
+  server.send(200, "application/json", s);
+}
+
+void handleSet(){
+  if(!server.hasArg("freq") || !server.hasArg("power")){
+    server.send(400, "text/plain", "Missing freq or power");
+    return;
+  }
+  uint64_t f = strtoull(server.arg("freq").c_str(), nullptr, 10);
+  int p = server.arg("power").toInt();
+
+  if(f < 35000000ULL || f > 4400000000ULL){
+    server.send(400, "text/plain", "Frequency out of range (35 MHz .. 4.4 GHz)");
+    return;
+  }
+  if(p < 0 || p > 3){
+    server.send(400, "text/plain", "Power must be 0..3 (0=-4,1=-1,2=+2,3=+5 dBm)");
+    return;
+  }
+  g_rfout_hz = f;
+  g_power = (uint8_t)p;
+
+  programAndSave();
+  server.send(200, "text/plain", "Updated");
+}
+
+void setup(){
+  Serial.begin(115200);
+
+  // Pins
+  pinMode(PIN_LE, OUTPUT);
+  pinMode(PIN_CLK, OUTPUT);
+  pinMode(PIN_DATA, OUTPUT);
+  pinMode(PIN_CE, OUTPUT);
+  pinMode(PIN_LD, INPUT);
+
+  digitalWrite(PIN_LE, LOW);
+  digitalWrite(PIN_CLK, LOW);
+  digitalWrite(PIN_DATA, LOW);
+  digitalWrite(PIN_CE, LOW);
+  delay(10);
+  digitalWrite(PIN_CE, HIGH); // enable ADF4351
+  delay(5);
+
+  // Restore saved settings
+  prefs.begin("adf4351", false);
+  g_rfout_hz = prefs.getULL("freq", g_rfout_hz);
+  g_power    = prefs.getUChar("power", g_power);
+
+  programAndSave();
+
+  // Wi-Fi AP
+  WiFi.mode(WIFI_AP);
+  WiFi.softAP(AP_SSID, AP_PASS);
+  IPAddress ip = WiFi.softAPIP();
+  Serial.print("AP IP: "); Serial.println(ip);
+
+  // Routes
+  server.on("/", HTTP_GET, handleRoot);
+  server.on("/api/status", HTTP_GET, handleStatus);
+  server.on("/api/set", HTTP_POST, handleSet);
+  server.begin();
+
+  Serial.println("Web server started. Open http://192.168.4.1");
+}
+
+void loop(){
+  server.handleClient();
+}
