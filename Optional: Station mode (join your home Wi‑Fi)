@@ -1,0 +1,9 @@
+// WiFi.mode(WIFI_AP);
+// WiFi.softAP(AP_SSID, AP_PASS);
+// IPAddress ip = WiFi.softAPIP();
+
+WiFi.mode(WIFI_STA);
+WiFi.begin("YourSSID", "YourPass");
+while (WiFi.status() != WL_CONNECTED) { delay(250); Serial.print("."); }
+IPAddress ip = WiFi.localIP();
+Serial.print("Connected. IP: "); Serial.println(ip);
