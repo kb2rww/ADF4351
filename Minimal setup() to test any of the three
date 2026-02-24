@@ -1,0 +1,9 @@
+void setup() {
+  synthInitPins();
+  // Choose ONE line below according to the chip you wired:
+  // use_ADF5355_1GHz();
+  // use_ADF4371_1GHz();
+  // use_LMX2594_1GHz();
+}
+
+void loop() {}
