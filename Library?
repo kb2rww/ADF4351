@@ -1,0 +1,13 @@
+// Pseudocode with a typical ADF4351 library
+ADF4351 pll(PIN_LE, PIN_CLK, PIN_DATA, PIN_CE);
+pll.begin();
+pll.setReference(10000000, false, false);  // 10 MHz, doubler=off, div2=off
+pll.setPFD(10000000);                       // derived automatically in many libs
+pll.setOutputDivider(4);                   // to place VCO at 4 GHz
+pll.setFeedback(ADF4351_FEEDBACK_FUNDAMENTAL);
+pll.setPrescaler(ADF4351_PRESCALER_8_9);
+pll.setChargePumpCurrent(ADF4351_CP_2_50mA);
+pll.setBandSelectClockDivider(200);
+pll.enableMuteTillLock(true);              // optional
+pll.setRfOutA(true, ADF4351_POWER_0dBm);   // RF output on
+pll.setFrequency(1000000000UL);            // 1 GHz
