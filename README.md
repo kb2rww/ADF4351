@@ -2,6 +2,8 @@
 ESP32 to ADF4351
 The right PLL math (for 10 MHz → 1 GHz)
 
+Using to make a CW beaken and other things.
+
 Reference (REFIN): 10 MHz
 R counter: 1 (no reference doubler/divider)
 PFD (phase detector): 10 MHz
