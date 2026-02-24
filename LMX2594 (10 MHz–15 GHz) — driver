@@ -1,0 +1,21 @@
+// ===== LMX2594 driver =====
+// TI writes [ADDR:8 | DATA:24] MSB-first, one 32-bit word per register.
+void LMX2594_program(const uint32_t* regs, size_t count) {
+  // Use CSB on the same PIN_LE line; hold low for each word, pulse high to latch
+  for (size_t i = 0; i < count; ++i) spiWrite32(regs[i]);
+}
+
+// 1.000 GHz (FILL WITH TICS PRO EXPORT)
+const uint32_t LMX2594_1GHz[] = {
+  // Example: 0xXXXXYYYY (ADDR in upper 8 bits, DATA in 24 bits)
+  // 0x71XXXXXX, 0x70XXXXXX, ..., 0x00XXXXXX
+};
+
+// 3.000 GHz (FILL WITH TICS PRO EXPORT)
+const uint32_t LMX2594_3GHz[] = {
+  // 0x71XXXXXX, 0x70XXXXXX, ..., 0x00XXXXXX
+};
+
+// Usage
+void use_LMX2594_1GHz() { LMX2594_program(LMX2594_1GHz, sizeof(LMX2594_1GHz)/4); }
+void use_LMX2594_3GHz() { LMX2594_program(LMX2594_3GHz, sizeof(LMX2594_3GHz)/4); }
