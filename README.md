@@ -1,6 +1,6 @@
 # ADF4351
 ESP32 to ADF4351
-The right PLL math (for 10 MHz → 1 GHz)
+The right PLL math (for 10 MHz → 1 GHz or 3 GHz)
 
 Using to make a CW beaken and other things.
 
